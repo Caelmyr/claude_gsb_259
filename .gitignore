@@ -1,0 +1,15 @@
+# 运行时数据
+data/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# 临时文件
+*.tmp
+*.part
+*.bak
+.DS_Store
