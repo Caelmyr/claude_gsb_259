@@ -23,6 +23,9 @@ HISTORY_JSON = os.path.join(META_DIR, "history.json")
 PRESETS_JSON = os.path.join(META_DIR, "presets.json")
 QUEUE_JSON = os.path.join(META_DIR, "queue.json")
 CACHE_JSON = os.path.join(META_DIR, "cache.json")
+DEDUP_JSON = os.path.join(META_DIR, "dedup_jobs.json")          # 查重任务（只放摘要）
+DEDUP_FP_JSON = os.path.join(META_DIR, "dedup_fingerprints.json")  # 图像感知指纹缓存
+DEDUP_RESULTS_DIR = os.path.join(META_DIR, "dedup")             # 每次扫描的分组结果（侧载文件）
 
 # ---------------------------------------------------------------------------
 # 限制与默认值
@@ -34,6 +37,15 @@ MAX_DIM = 1600                    # 算法工作副本的最长边（超出则�
 PREVIEW_DIM = 900                 # 前端展示/下载的完整预览尺寸
 THUMB_DIM = 220                   # 缩略图最长边
 FEATURE_WORK_DIM = 360            # 特征提取/检测/分割的工作分辨率（加速）
+
+# 查重（相似图聚类）
+DEDUP_HASH_DIM = 128             # 感知哈希工作分辨率：原图压到 128×128 灰度再做 DCT
+DEDUP_THUMB_DIM = 256            # 无缩略图时直接读原图，先压到该尺寸防大图爆内存
+DEDUP_DEFAULT_THRESHOLD = 90     # 默认相似度（百分比）
+DEDUP_MIN_THRESHOLD = 50
+DEDUP_MAX_THRESHOLD = 99
+DEDUP_MAX_JOBS = 50              # 查重任务记录上限
+DEDUP_WORKERS = 2                # 指纹提取线程数（CPU 密集，控制内存）
 
 MAX_BATCH_WORKERS = 2             # 批处理线程池大小（CPU 密集，控制内存）
 CACHE_MAX_BYTES = 256 * 1024 * 1024
@@ -48,6 +60,7 @@ ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff", ".webp"}
 # ---------------------------------------------------------------------------
 _ALL_DIRS = [
     DATA_DIR, IMAGES_DIR, RESULTS_DIR, THUMBS_DIR, CACHE_DIR, META_DIR,
+    DEDUP_RESULTS_DIR,
 ]
 
 

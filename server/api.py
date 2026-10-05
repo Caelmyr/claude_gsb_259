@@ -13,6 +13,7 @@ from . import config, pipeline as pipeline_engine
 from .algorithms import detection, features, segmentation, style, util
 from .batch import BatchManager, process_image
 from .cache import ResultCache, make_key
+from .dedup import DedupManager
 from .history import HistoryManager
 from .image_store import ImageStore
 from .nodes import CATEGORIES, get_public_nodes
@@ -27,6 +28,7 @@ image_store = ImageStore()
 cache = ResultCache()
 history = HistoryManager()
 batch = BatchManager(image_store, cache, history)
+dedup = DedupManager(image_store)
 presets_store = JsonStore(config.PRESETS_JSON, [])
 
 bp = Blueprint("api", __name__, url_prefix="/api")
@@ -123,6 +125,9 @@ def get_config():
         "preview_dim": config.PREVIEW_DIM,
         "categories": CATEGORIES,
         "batch_workers": config.MAX_BATCH_WORKERS,
+        "dedup_default_threshold": config.DEDUP_DEFAULT_THRESHOLD,
+        "dedup_min_threshold": config.DEDUP_MIN_THRESHOLD,
+        "dedup_max_threshold": config.DEDUP_MAX_THRESHOLD,
     })
 
 
@@ -192,7 +197,25 @@ def patch_image(image_id):
 def delete_image(image_id):
     if not image_store.delete(image_id):
         return jsonify({"error": "not found"}), 404
+    dedup.forget(image_id)
     return jsonify({"ok": True})
+
+
+@bp.post("/images/bulk-delete")
+def bulk_delete_images():
+    """批量删除（查重页「清理所选」用）。返回成功/失败/缺失清单。"""
+    data = request.get_json(silent=True) or {}
+    ids = data.get("ids", [])
+    if not isinstance(ids, list) or not ids:
+        return jsonify({"error": "缺少 ids"}), 400
+    deleted, missing = [], []
+    for image_id in ids:
+        if image_store.delete(image_id):
+            dedup.forget(image_id)
+            deleted.append(image_id)
+        else:
+            missing.append(image_id)
+    return jsonify({"ok": True, "deleted": deleted, "missing": missing})
 
 
 @bp.get("/images/<image_id>/file")
@@ -642,10 +665,67 @@ def restore_history(history_id):
     return jsonify(_pipeline_view(rec))
 
 
+# ---------------------------------------------------------------------------
+# 查重（相似图聚类）
+# ---------------------------------------------------------------------------
+def _dedup_job_view(j, include_groups=False):
+    view = {
+        "id": j["id"], "status": j.get("status"),
+        "threshold": j.get("threshold"), "total": j.get("total", 0),
+        "done": j.get("done", 0), "errors": j.get("errors", 0),
+        "stage": j.get("stage", ""),
+        "created_at": j.get("created_at"), "finished_at": j.get("finished_at"),
+        "summary": j.get("summary"),
+    }
+    if include_groups:
+        view["result"] = dedup.load_result(j["id"])
+    return view
+
+
+@bp.post("/dedup/scan")
+def dedup_scan():
+    data = request.get_json(silent=True) or {}
+    try:
+        threshold = float(data.get("threshold", config.DEDUP_DEFAULT_THRESHOLD))
+    except (TypeError, ValueError):
+        return jsonify({"error": "阈值需为数字"}), 400
+    threshold = max(config.DEDUP_MIN_THRESHOLD, min(config.DEDUP_MAX_THRESHOLD, threshold))
+    force = bool(data.get("force_refresh", False))
+    try:
+        job = dedup.start_scan(threshold, force_refresh=force)
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 409
+    return jsonify({"job_id": job["id"]})
+
+
+@bp.get("/dedup/jobs")
+def dedup_list_jobs():
+    jobs = [_dedup_job_view(j) for j in dedup._read_jobs()]
+    return jsonify({"jobs": jobs})
+
+
+@bp.get("/dedup/jobs/<job_id>")
+def dedup_get_job(job_id):
+    j = dedup.get_job(job_id)
+    if not j:
+        return jsonify({"error": "not found"}), 404
+    include_groups = request.args.get("groups") == "1" or j.get("status") == "done"
+    return jsonify(_dedup_job_view(j, include_groups=include_groups))
+
+
+@bp.post("/dedup/jobs/<job_id>/cancel")
+def dedup_cancel_job(job_id):
+    j = dedup.cancel(job_id)
+    if not j:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(_dedup_job_view(j))
+
+
 def init_app(app):
     """在应用启动时注册蓝图并做一次性一致性检查。"""
     app.register_blueprint(bp)
     issues = image_store.reconcile()
     if issues["orphan_files"] or issues["orphan_meta"]:
         app.logger.info("启动一致性检查发现孤儿：%s", issues)
+    dedup.prune_fingerprints()
     return app
