@@ -13,6 +13,7 @@ from . import config, pipeline as pipeline_engine
 from .algorithms import detection, features, segmentation, style, util
 from .batch import BatchManager, process_image
 from .cache import ResultCache, make_key
+from .dedup import DedupManager
 from .history import HistoryManager
 from .image_store import ImageStore
 from .nodes import CATEGORIES, get_public_nodes
@@ -27,6 +28,7 @@ image_store = ImageStore()
 cache = ResultCache()
 history = HistoryManager()
 batch = BatchManager(image_store, cache, history)
+dedup = DedupManager(image_store)
 presets_store = JsonStore(config.PRESETS_JSON, [])
 
 bp = Blueprint("api", __name__, url_prefix="/api")
@@ -542,6 +544,55 @@ def get_batch(job_id):
 @bp.post("/batch/<job_id>/cancel")
 def cancel_batch(job_id):
     job = batch.cancel(job_id)
+    if not job:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(job)
+
+
+# ---------------------------------------------------------------------------
+# 图库查重
+# ---------------------------------------------------------------------------
+@bp.get("/dedup/config")
+def dedup_config():
+    return jsonify({
+        "default_threshold": config.DEDUP_DEFAULT_THRESHOLD,
+        "min_threshold": config.DEDUP_MIN_THRESHOLD,
+        "max_threshold": config.DEDUP_MAX_THRESHOLD,
+        "max_candidates": config.DEDUP_MAX_CANDIDATES,
+    })
+
+
+@bp.post("/dedup/scan")
+def dedup_scan():
+    data = request.get_json(silent=True) or {}
+    image_ids = data.get("image_ids")
+    if image_ids is not None:
+        if not isinstance(image_ids, list) or not image_ids:
+            return jsonify({"error": "image_ids 必须是非空数组（或省略以扫描全库）"}), 400
+        known = set(image_store.meta.read().keys())
+        image_ids = [i for i in image_ids if i in known]
+        if not image_ids:
+            return jsonify({"error": "所选图像均不存在"}), 400
+    job = dedup.enqueue(threshold=data.get("threshold"), image_ids=image_ids)
+    return jsonify({"job_id": job["id"]})
+
+
+@bp.get("/dedup/jobs")
+def dedup_jobs():
+    return jsonify({"jobs": dedup.jobs.read().get("jobs", [])})
+
+
+@bp.get("/dedup/jobs/<job_id>")
+def dedup_job(job_id):
+    job = dedup.get_job(job_id)
+    if not job:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(job)
+
+
+@bp.post("/dedup/jobs/<job_id>/cancel")
+def dedup_cancel(job_id):
+    job = dedup.cancel(job_id)
     if not job:
         return jsonify({"error": "not found"}), 404
     return jsonify(job)

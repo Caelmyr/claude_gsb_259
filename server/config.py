@@ -23,6 +23,8 @@ HISTORY_JSON = os.path.join(META_DIR, "history.json")
 PRESETS_JSON = os.path.join(META_DIR, "presets.json")
 QUEUE_JSON = os.path.join(META_DIR, "queue.json")
 CACHE_JSON = os.path.join(META_DIR, "cache.json")
+DEDUP_JSON = os.path.join(META_DIR, "dedup.json")        # 查重指纹缓存（哈希/直方图/清晰度）
+DEDUP_JOBS_JSON = os.path.join(META_DIR, "dedup_jobs.json")
 
 # ---------------------------------------------------------------------------
 # 限制与默认值
@@ -42,6 +44,17 @@ PIPELINE_MAX_VERSIONS = 20        # 每条流水线保留的版本快照数
 HISTORY_MAX_ENTRIES = 500         # 历史记录上限（超出裁掉最旧）
 
 ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff", ".webp"}
+
+# ---------------------------------------------------------------------------
+# 查重
+# ---------------------------------------------------------------------------
+DEDUP_DEFAULT_THRESHOLD = 86        # 相似度阈值默认值（0-100，越高越严格）
+DEDUP_MIN_THRESHOLD = 50
+DEDUP_MAX_THRESHOLD = 99
+DEDUP_HASH_GATE = 0.70              # 内部粗筛闸口：综合结构哈希相似度低于此值不做精验
+DEDUP_MAX_CANDIDATES = 200000       # 单次扫描精验候选对上限（防极端图库耗时失控）
+DEDUP_EDGE_DIM = 32                 # 边缘互相关工作尺寸
+DEDUP_MAX_JOBS = 20                 # 查重任务历史保留数
 
 # ---------------------------------------------------------------------------
 # 目录
